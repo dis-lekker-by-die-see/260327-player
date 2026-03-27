@@ -793,6 +793,7 @@
           value: await hashPassword(password),
         });
         await dbPut(db, "meta", { key: "filesMeta", value: fileIndex });
+        showScreen(screenPlayer);
       }
 
       // ============ UNLOCK ============
