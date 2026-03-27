@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Media Player</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        background: #0f0f0f;
+        color: #e1e1e1;
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 40px 20px;
+      }
+      .container {
+        width: 100%;
+        max-width: 720px;
+      }
+      h1 {
+        font-size: 1.8rem;
+        margin-bottom: 24px;
+        color: #ff4444;
+        text-align: center;
+      }
+
+      /* Password screen */
+      #screen-password {
+        text-align: center;
+        padding-top: 80px;
+      }
+      #password-input {
+        display: block;
+        width: 100%;
+        max-width: 360px;
+        margin: 0 auto 12px;
+        padding: 14px 18px;
+        border: 1px solid #333;
+        border-radius: 8px;
+        background: #1a1a1a;
+        color: #e1e1e1;
+        font-size: 1.1rem;
+        text-align: center;
+        outline: none;
+      }
+      #password-input:focus {
+        border-color: #ff4444;
+      }
+      #unlock-btn {
+        padding: 12px 48px;
+        background: #ff4444;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #unlock-btn:hover {
+        background: #cc3333;
+      }
+      #unlock-btn:disabled {
+        background: #555;
+        cursor: not-allowed;
+      }
+      .auth-error {
+        margin-top: 12px;
+        color: #ff6666;
+        font-size: 0.9rem;
+      }
+
+      /* Loading screen */
+      #screen-loading {
+        text-align: center;
+        padding-top: 80px;
+      }
+      #screen-loading h2 {
+        font-size: 1.2rem;
+        color: #aaa;
+        margin-bottom: 16px;
+      }
+      .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #222;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 12px;
+      }
+      #progress-fill {
+        height: 100%;
+        width: 0%;
+        background: #ff4444;
+        border-radius: 4px;
+        transition: width 0.2s;
+      }
+      #loading-detail {
+        color: #666;
+        font-size: 0.85rem;
+      }
+
+      /* Player screen */
+      #player {
+        width: 100%;
+        border-radius: 12px;
+        background: #000;
+        max-height: 400px;
+      }
+      .player-controls {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .ctrl-btn {
+        padding: 6px 12px;
+        background: transparent;
+        color: #666;
+        border: 1px solid #333;
+        border-radius: 6px;
+        font-size: 1rem;
+        cursor: pointer;
+        transition:
+          color 0.2s,
+          border-color 0.2s;
+      }
+      .ctrl-btn:hover {
+        color: #ccc;
+        border-color: #555;
+      }
+      .ctrl-btn.active {
+        color: #ff4444;
+        border-color: #ff4444;
+      }
+      #now-playing {
+        margin-top: 10px;
+        padding: 8px 12px;
+        background: #1a2a1a;
+        border-radius: 8px;
+        color: #44cc44;
+        font-size: 0.9rem;
+      }
+      #np-title {
+        font-weight: 600;
+      }
+
+      /* Playlist */
+      #playlist-section {
+        margin-top: 16px;
+        background: #1a1a1a;
+        border: 1px solid #2a2a2a;
+        border-radius: 12px;
+        padding: 20px;
+      }
+      #playlist-section h3 {
+        font-size: 1rem;
+        color: #aaa;
+        margin-bottom: 12px;
+      }
+      #playlist-container {
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .playlist-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .playlist-item:hover {
+        background: #252525;
+      }
+      .playlist-item.active {
+        background: #2a1a1a;
+        border-left: 3px solid #ff4444;
+      }
+      .playlist-item.pending {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .playlist-item.pending:hover {
+        background: transparent;
+      }
+      .playlist-name {
+        font-size: 0.9rem;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-right: 12px;
+      }
+      .playlist-size {
+        font-size: 0.8rem;
+        color: #666;
+        white-space: nowrap;
+      }
+      #decrypt-status {
+        margin-top: 8px;
+        padding: 6px 10px;
+        color: #666;
+        font-size: 0.8rem;
+        text-align: center;
+      }
+
+      /* Utility */
+      .hidden {
+        display: none !important;
+      }
+      #playlist-container::-webkit-scrollbar {
+        width: 6px;
+      }
+      #playlist-container::-webkit-scrollbar-track {
+        background: #1a1a1a;
+      }
+      #playlist-container::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- Password Screen -->
+      <div id="screen-password">
+        <h1>Media Player</h1>
+        <input
+          type="password"
+          id="password-input"
+          placeholder="Enter password"
+          autofocus
+        />
+        <button id="unlock-btn">Unlock</button>
+        <div id="auth-error" class="auth-error hidden"></div>
+      </div>
+
+      <!-- Loading Screen -->
+      <div id="screen-loading" class="hidden">
+        <h1>Media Player</h1>
+        <h2 id="loading-status">Downloading...</h2>
+        <div class="progress-bar"><div id="progress-fill"></div></div>
+        <div id="loading-detail"></div>
+      </div>
+
+      <!-- Player Screen -->
+      <div id="screen-player" class="hidden">
+        <h1>Media Player</h1>
+        <video id="player" controls></video>
+        <div class="player-controls">
+          <button class="ctrl-btn" id="btn-repeat" title="Repeat off">
+            &#128257;
+          </button>
+          <button class="ctrl-btn" id="btn-shuffle" title="Shuffle off">
+            &#128256;
+          </button>
+          <button
+            class="ctrl-btn"
+            id="btn-clear"
+            title="Clear cache &amp; reload"
+          >
+            &#128465;
+          </button>
+        </div>
+        <div id="now-playing" class="hidden">
+          Now playing: <span id="np-title"></span>
+        </div>
+        <div id="playlist-section">
+          <h3>Library</h3>
+          <div id="playlist-container"></div>
+          <div id="decrypt-status" class="hidden"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // ============ CONFIG ============
+      const MANIFEST_URL = "library/manifest.json";
+      const DB_NAME = "encrypted-media-player";
+      const DB_VERSION = 1;
+
+      // ============ DOM ============
+      const screenPassword = document.getElementById("screen-password");
+      const screenLoading = document.getElementById("screen-loading");
+      const screenPlayer = document.getElementById("screen-player");
+      const passwordInput = document.getElementById("password-input");
+      const unlockBtn = document.getElementById("unlock-btn");
+      const authError = document.getElementById("auth-error");
+      const loadingStatus = document.getElementById("loading-status");
+      const progressFill = document.getElementById("progress-fill");
+      const loadingDetail = document.getElementById("loading-detail");
+      const player = document.getElementById("player");
+      const btnRepeat = document.getElementById("btn-repeat");
+      const btnShuffle = document.getElementById("btn-shuffle");
+      const btnClear = document.getElementById("btn-clear");
+      const nowPlaying = document.getElementById("now-playing");
+      const npTitle = document.getElementById("np-title");
+      const playlistContainer = document.getElementById("playlist-container");
+      const decryptStatus = document.getElementById("decrypt-status");
+
+      // ============ STATE ============
+      let fileIndex = [];
+      let readyFiles = new Set();
+      let currentTrack = -1;
+      let currentBlobUrl = null;
+      let repeatMode = "off";
+      let shuffleOn = false;
+
+      // ============ UTILS ============
+      const MIME = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".m4a": "audio/mp4",
+        ".mp3": "audio/mpeg",
+        ".opus": "audio/opus",
+        ".ogg": "audio/ogg",
+        ".wav": "audio/wav",
+      };
+      function getMime(name) {
+        const ext = "." + name.split(".").pop().toLowerCase();
+        return MIME[ext] || "video/mp4";
+      }
+      function formatSize(bytes) {
+        if (!bytes) return "";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
+        if (bytes < 1024 * 1024 * 1024)
+          return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+      }
+      function escapeHtml(s) {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+      function hexToBytes(hex) {
+        const b = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < hex.length; i += 2)
+          b[i / 2] = parseInt(hex.substr(i, 2), 16);
+        return b;
+      }
+
+      // ============ INDEXED DB ============
+      function openDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains("files"))
+              db.createObjectStore("files", { keyPath: "name" });
+            if (!db.objectStoreNames.contains("meta"))
+              db.createObjectStore("meta", { keyPath: "key" });
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      function dbGet(db, store, key) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(store, "readonly");
+          const req = tx.objectStore(store).get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      function dbPut(db, store, value) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(store, "readwrite");
+          const req = tx.objectStore(store).put(value);
+          req.onsuccess = () => resolve();
+          req.onerror = () => reject(req.error);
+        });
+      }
+      function dbGetAllKeys(db, store) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(store, "readonly");
+          const req = tx.objectStore(store).getAllKeys();
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      function dbClear(db) {
+        return Promise.all(
+          ["files", "meta"].map(
+            (store) =>
+              new Promise((resolve, reject) => {
+                const tx = db.transaction(store, "readwrite");
+                tx.objectStore(store).clear().onsuccess = () => resolve();
+                tx.onerror = () => reject(tx.error);
+              }),
+          ),
+        );
+      }
+
+      // ============ CRYPTO ============
+      async function deriveKey(password, saltHex, iterations) {
+        const keyMaterial = await crypto.subtle.importKey(
+          "raw",
+          new TextEncoder().encode(password),
+          "PBKDF2",
+          false,
+          ["deriveKey"],
+        );
+        return crypto.subtle.deriveKey(
+          {
+            name: "PBKDF2",
+            salt: hexToBytes(saltHex),
+            iterations,
+            hash: "SHA-256",
+          },
+          keyMaterial,
+          { name: "AES-GCM", length: 256 },
+          false,
+          ["decrypt"],
+        );
+      }
+      async function decryptData(
+        password,
+        saltHex,
+        ivHex,
+        iterations,
+        ciphertext,
+      ) {
+        const key = await deriveKey(password, saltHex, iterations);
+        return crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: hexToBytes(ivHex) },
+          key,
+          ciphertext,
+        );
+      }
+      async function hashPassword(password) {
+        const hash = await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode(password),
+        );
+        return Array.from(new Uint8Array(hash))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+      }
+
+      // ============ SCREENS ============
+      function showScreen(s) {
+        screenPassword.classList.add("hidden");
+        screenLoading.classList.add("hidden");
+        screenPlayer.classList.add("hidden");
+        s.classList.remove("hidden");
+      }
+
+      // ============ PLAYLIST ============
+      function renderPlaylist() {
+        playlistContainer.innerHTML = "";
+        fileIndex.forEach((file, i) => {
+          const ready = readyFiles.has(file.name);
+          const item = document.createElement("div");
+          item.className =
+            "playlist-item" +
+            (i === currentTrack ? " active" : "") +
+            (!ready ? " pending" : "");
+          item.innerHTML =
+            '<span class="playlist-name">' +
+            escapeHtml(file.name) +
+            "</span>" +
+            '<span class="playlist-size">' +
+            formatSize(file.originalSize) +
+            "</span>";
+          if (ready) item.addEventListener("click", () => playTrack(i));
+          playlistContainer.appendChild(item);
+        });
+      }
+
+      // ============ PLAYBACK ============
+      async function playTrack(index) {
+        if (index < 0 || index >= fileIndex.length) return;
+        if (!readyFiles.has(fileIndex[index].name)) return;
+        currentTrack = index;
+        const file = fileIndex[index];
+        const db = await openDB();
+        const record = await dbGet(db, "files", file.name);
+        if (!record) return;
+        if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+        currentBlobUrl = URL.createObjectURL(record.data);
+        player.src = currentBlobUrl;
+        player.play();
+        npTitle.textContent = file.name;
+        nowPlaying.classList.remove("hidden");
+        renderPlaylist();
+      }
+
+      function getNextTrack() {
+        if (repeatMode === "one") return currentTrack;
+        if (shuffleOn) {
+          const ready = fileIndex
+            .map((f, i) => i)
+            .filter((i) => readyFiles.has(fileIndex[i].name));
+          if (ready.length <= 1) return ready[0] ?? -1;
+          let next;
+          do {
+            next = ready[Math.floor(Math.random() * ready.length)];
+          } while (next === currentTrack);
+          return next;
+        }
+        const next = currentTrack + 1;
+        if (next < fileIndex.length && readyFiles.has(fileIndex[next].name))
+          return next;
+        if (repeatMode === "all") {
+          const first = fileIndex.findIndex((f) => readyFiles.has(f.name));
+          return first >= 0 ? first : -1;
+        }
+        return -1;
+      }
+
+      player.addEventListener("ended", () => {
+        const next = getNextTrack();
+        if (next >= 0) playTrack(next);
+      });
+
+      // ============ CONTROLS ============
+      btnRepeat.addEventListener("click", () => {
+        if (repeatMode === "off") {
+          repeatMode = "one";
+          btnRepeat.classList.add("active");
+          btnRepeat.title = "Repeat one";
+          btnRepeat.innerHTML = "&#128258;";
+        } else if (repeatMode === "one") {
+          repeatMode = "all";
+          btnRepeat.title = "Repeat all";
+          btnRepeat.innerHTML = "&#128257;";
+        } else {
+          repeatMode = "off";
+          btnRepeat.classList.remove("active");
+          btnRepeat.title = "Repeat off";
+          btnRepeat.innerHTML = "&#128257;";
+        }
+      });
+      btnShuffle.addEventListener("click", () => {
+        shuffleOn = !shuffleOn;
+        btnShuffle.classList.toggle("active", shuffleOn);
+        btnShuffle.title = shuffleOn ? "Shuffle on" : "Shuffle off";
+      });
+      btnClear.addEventListener("click", async () => {
+        if (!confirm("Clear cached files and reload?")) return;
+        const db = await openDB();
+        await dbClear(db);
+        location.reload();
+      });
+
+      // ============ DOWNLOAD + DECRYPT ============
+      async function processBlob(password, db) {
+        showScreen(screenLoading);
+        loadingStatus.textContent = "Fetching manifest...";
+        progressFill.style.width = "0%";
+        loadingDetail.textContent = "";
+
+        // 1. Fetch manifest to discover chunks
+        const manifestResp = await fetch(MANIFEST_URL);
+        if (!manifestResp.ok) throw new Error("Failed to download manifest.");
+        const manifest = await manifestResp.json();
+        const chunkList = manifest.chunks; // [{name, size}, ...]
+        const totalSize = chunkList.reduce((s, c) => s + c.size, 0);
+
+        // 2. Download all chunks sequentially, showing progress
+        loadingStatus.textContent =
+          "Downloading " + chunkList.length + " chunk(s)...";
+        const chunkBuffers = [];
+        let received = 0;
+
+        for (let ci = 0; ci < chunkList.length; ci++) {
+          const chunkInfo = chunkList[ci];
+          const resp = await fetch("library/" + chunkInfo.name);
+          if (!resp.ok)
+            throw new Error("Failed to download chunk: " + chunkInfo.name);
+
+          const reader = resp.body.getReader();
+          const parts = [];
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            parts.push(value);
+            received += value.length;
+            progressFill.style.width = (received / totalSize) * 100 + "%";
+            loadingDetail.textContent =
+              (received / 1024 / 1024).toFixed(1) +
+              " / " +
+              (totalSize / 1024 / 1024).toFixed(1) +
+              " MB  (chunk " +
+              (ci + 1) +
+              "/" +
+              chunkList.length +
+              ")";
+          }
+          // Concatenate parts of this chunk
+          let chunkLen = 0;
+          for (const p of parts) chunkLen += p.length;
+          const chunkBuf = new Uint8Array(chunkLen);
+          let off = 0;
+          for (const p of parts) {
+            chunkBuf.set(p, off);
+            off += p.length;
+          }
+          chunkBuffers.push(chunkBuf);
+        }
+
+        // 3. Reassemble into a single buffer
+        const fullBuffer = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const buf of chunkBuffers) {
+          fullBuffer.set(buf, offset);
+          offset += buf.length;
+        }
+
+        // Parse header
+        const indexLen = new DataView(fullBuffer.buffer).getUint32(0);
+        const meta = JSON.parse(
+          new TextDecoder().decode(fullBuffer.slice(4, 4 + indexLen)),
+        );
+        const dataStart = 4 + indexLen;
+
+        // Verify password
+        loadingStatus.textContent = "Verifying password...";
+        progressFill.style.width = "0%";
+        await new Promise((r) => setTimeout(r, 50));
+
+        try {
+          const v = meta.verify;
+          await decryptData(
+            password,
+            v.salt,
+            v.iv,
+            meta.iterations,
+            hexToBytes(v.data),
+          );
+        } catch {
+          throw new Error("Wrong password");
+        }
+
+        // Switch to player screen — files appear as they decrypt
+        fileIndex = meta.files;
+        showScreen(screenPlayer);
+        renderPlaylist();
+
+        let dataOffset = dataStart;
+        for (let i = 0; i < meta.files.length; i++) {
+          const file = meta.files[i];
+          const ciphertext = fullBuffer.slice(
+            dataOffset,
+            dataOffset + file.size,
+          );
+          dataOffset += file.size;
+
+          decryptStatus.textContent =
+            "Decrypting " + (i + 1) + " of " + meta.files.length + "...";
+          decryptStatus.classList.remove("hidden");
+          await new Promise((r) => setTimeout(r, 10));
+
+          const plaintext = await decryptData(
+            password,
+            file.salt,
+            file.iv,
+            meta.iterations,
+            ciphertext,
+          );
+          const blob = new Blob([plaintext], { type: getMime(file.name) });
+          await dbPut(db, "files", { name: file.name, data: blob });
+          readyFiles.add(file.name);
+          renderPlaylist();
+        }
+
+        decryptStatus.classList.add("hidden");
+
+        await dbPut(db, "meta", {
+          key: "passwordHash",
+          value: await hashPassword(password),
+        });
+        await dbPut(db, "meta", { key: "filesMeta", value: meta.files });
+      }
+
+      // ============ UNLOCK ============
+      async function unlock() {
+        const password = passwordInput.value;
+        if (!password) return;
+
+        unlockBtn.disabled = true;
+        authError.classList.add("hidden");
+
+        try {
+          const db = await openDB();
+
+          // Check for cached session
+          const cachedHash = await dbGet(db, "meta", "passwordHash");
+          const cachedMeta = await dbGet(db, "meta", "filesMeta");
+
+          if (cachedHash && cachedMeta) {
+            const inputHash = await hashPassword(password);
+            if (inputHash === cachedHash.value) {
+              const cachedKeys = new Set(await dbGetAllKeys(db, "files"));
+              const allPresent = cachedMeta.value.every((f) =>
+                cachedKeys.has(f.name),
+              );
+              if (allPresent) {
+                fileIndex = cachedMeta.value;
+                readyFiles = cachedKeys;
+                showScreen(screenPlayer);
+                renderPlaylist();
+                return;
+              }
+            }
+          }
+
+          // Fresh download + decrypt
+          await processBlob(password, db);
+        } catch (e) {
+          showScreen(screenPassword);
+          if (e.message === "Wrong password") {
+            authError.textContent = "Wrong password.";
+          } else {
+            authError.textContent = e.message || "An error occurred.";
+          }
+          authError.classList.remove("hidden");
+        } finally {
+          unlockBtn.disabled = false;
+        }
+      }
+
+      // ============ EVENTS ============
+      unlockBtn.addEventListener("click", unlock);
+      passwordInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") unlock();
+      });
+
+      // ============ SERVICE WORKER ============
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      }
+    </script>
+  </body>
+</html>
