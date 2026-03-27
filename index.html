@@ -712,9 +712,6 @@
         let allNewFiles = [];
         let fileOffset = fileIndex.length;
 
-        // Show player screen early so files appear as they decrypt
-        showScreen(screenPlayer);
-
         for (let di = 0; di < setsToDownload.length; di++) {
           const { index: si, set, id: setId } = setsToDownload[di];
 
@@ -846,7 +843,11 @@
           if (e.message === "Wrong password") {
             authError.textContent = "Wrong password.";
           } else {
-            authError.textContent = e.message || "An error occurred.";
+            authError.textContent =
+              (e.message || "An error occurred.") +
+              " [" +
+              e.stack?.split("\n")[1]?.trim() +
+              "]";
           }
           authError.classList.remove("hidden");
         } finally {
