@@ -663,11 +663,13 @@
         return newFiles;
       }
 
-      async function processBlob(password, db) {
-        showScreen(screenLoading);
-        loadingStatus.textContent = "Fetching manifest...";
-        progressFill.style.width = "0%";
-        loadingDetail.textContent = "";
+      async function processBlob(password, db, background) {
+        if (!background) {
+          showScreen(screenLoading);
+          loadingStatus.textContent = "Fetching manifest...";
+          progressFill.style.width = "0%";
+          loadingDetail.textContent = "";
+        }
 
         // 1. Fetch manifest
         const manifestResp = await fetch(MANIFEST_URL + "?t=" + Date.now());
@@ -694,6 +696,8 @@
           // Everything cached — nothing to download
           return;
         }
+
+        if (background) showScreen(screenLoading);
 
         // Calculate total download size
         const grandTotal = setsToDownload.reduce(
@@ -750,8 +754,12 @@
             passwordVerified = true;
           }
 
-          // Add file entries and render
-          fileIndex = fileIndex.concat(meta.files);
+          // Add file entries (skip duplicates)
+          for (const f of meta.files) {
+            if (!fileIndex.some((e) => e.name === f.name)) {
+              fileIndex.push(f);
+            }
+          }
           renderPlaylist();
 
           // Count total files across all sets to download
@@ -814,9 +822,9 @@
               showScreen(screenPlayer);
               renderPlaylist();
 
-              // Check for new sets to download
+              // Check for new sets in background
               try {
-                await processBlob(password, db);
+                await processBlob(password, db, true);
               } catch (e) {
                 // Ignore — already showing player with cached files
                 if (e.message === "Wrong password") {
