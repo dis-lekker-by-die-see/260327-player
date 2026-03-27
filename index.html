@@ -554,24 +554,18 @@
       });
 
       // ============ DOWNLOAD + DECRYPT ============
-      async function processBlob(password, db) {
-        showScreen(screenLoading);
-        loadingStatus.textContent = "Fetching manifest...";
-        progressFill.style.width = "0%";
-        loadingDetail.textContent = "";
 
-        // 1. Fetch manifest to discover chunks
-        const manifestResp = await fetch(MANIFEST_URL);
-        if (!manifestResp.ok) throw new Error("Failed to download manifest.");
-        const manifest = await manifestResp.json();
-        const chunkList = manifest.chunks; // [{name, size}, ...]
-        const totalSize = chunkList.reduce((s, c) => s + c.size, 0);
-
-        // 2. Download all chunks sequentially, showing progress
-        loadingStatus.textContent =
-          "Downloading " + chunkList.length + " chunk(s)...";
+      // Download a single set's chunks into a reassembled Uint8Array
+      async function downloadSet(
+        chunkList,
+        setIdx,
+        totalSets,
+        startBytes,
+        grandTotal,
+      ) {
+        const setSize = chunkList.reduce((s, c) => s + c.size, 0);
         const chunkBuffers = [];
-        let received = 0;
+        let received = startBytes;
 
         for (let ci = 0; ci < chunkList.length; ci++) {
           const chunkInfo = chunkList[ci];
@@ -586,18 +580,17 @@
             if (done) break;
             parts.push(value);
             received += value.length;
-            progressFill.style.width = (received / totalSize) * 100 + "%";
+            progressFill.style.width = (received / grandTotal) * 100 + "%";
             loadingDetail.textContent =
               (received / 1024 / 1024).toFixed(1) +
               " / " +
-              (totalSize / 1024 / 1024).toFixed(1) +
-              " MB  (chunk " +
-              (ci + 1) +
+              (grandTotal / 1024 / 1024).toFixed(1) +
+              " MB  (set " +
+              (setIdx + 1) +
               "/" +
-              chunkList.length +
+              totalSets +
               ")";
           }
-          // Concatenate parts of this chunk
           let chunkLen = 0;
           for (const p of parts) chunkLen += p.length;
           const chunkBuf = new Uint8Array(chunkLen);
@@ -609,55 +602,48 @@
           chunkBuffers.push(chunkBuf);
         }
 
-        // 3. Reassemble into a single buffer
-        const fullBuffer = new Uint8Array(totalSize);
+        const fullBuffer = new Uint8Array(setSize);
         let offset = 0;
         for (const buf of chunkBuffers) {
           fullBuffer.set(buf, offset);
           offset += buf.length;
         }
+        return { buffer: fullBuffer, bytesDownloaded: received };
+      }
 
-        // Parse header
-        const indexLen = new DataView(fullBuffer.buffer).getUint32(0);
+      // Parse a set blob: header + encrypted files
+      function parseSetBlob(buffer) {
+        const indexLen = new DataView(
+          buffer.buffer,
+          buffer.byteOffset,
+        ).getUint32(0);
         const meta = JSON.parse(
-          new TextDecoder().decode(fullBuffer.slice(4, 4 + indexLen)),
+          new TextDecoder().decode(buffer.slice(4, 4 + indexLen)),
         );
         const dataStart = 4 + indexLen;
+        return { meta, dataStart };
+      }
 
-        // Verify password
-        loadingStatus.textContent = "Verifying password...";
-        progressFill.style.width = "0%";
-        await new Promise((r) => setTimeout(r, 50));
-
-        try {
-          const v = meta.verify;
-          await decryptData(
-            password,
-            v.salt,
-            v.iv,
-            meta.iterations,
-            hexToBytes(v.data),
-          );
-        } catch {
-          throw new Error("Wrong password");
-        }
-
-        // Switch to player screen — files appear as they decrypt
-        fileIndex = meta.files;
-        showScreen(screenPlayer);
-        renderPlaylist();
-
+      // Decrypt all files in a set buffer
+      async function decryptSet(
+        password,
+        buffer,
+        meta,
+        dataStart,
+        db,
+        fileOffset,
+        totalFiles,
+      ) {
         let dataOffset = dataStart;
+        const newFiles = [];
         for (let i = 0; i < meta.files.length; i++) {
           const file = meta.files[i];
-          const ciphertext = fullBuffer.slice(
-            dataOffset,
-            dataOffset + file.size,
-          );
+          const ciphertext = buffer.slice(dataOffset, dataOffset + file.size);
           dataOffset += file.size;
 
+          const globalIdx = fileOffset + i;
           decryptStatus.textContent =
-            "Decrypting " + (i + 1) + " of " + meta.files.length + "...";
+            "Decrypting " + (globalIdx + 1) + " of " + totalFiles + "...";
           decryptStatus.classList.remove("hidden");
           await new Promise((r) => setTimeout(r, 10));
 
@@ -671,7 +657,128 @@
           const blob = new Blob([plaintext], { type: getMime(file.name) });
           await dbPut(db, "files", { name: file.name, data: blob });
           readyFiles.add(file.name);
+          newFiles.push(file);
           renderPlaylist();
+        }
+        return newFiles;
+      }
+
+      async function processBlob(password, db) {
+        showScreen(screenLoading);
+        loadingStatus.textContent = "Fetching manifest...";
+        progressFill.style.width = "0%";
+        loadingDetail.textContent = "";
+
+        // 1. Fetch manifest
+        const manifestResp = await fetch(MANIFEST_URL + "?t=" + Date.now());
+        if (!manifestResp.ok) throw new Error("Failed to download manifest.");
+        const manifest = await manifestResp.json();
+
+        // Support both old format {"chunks":[...]} and new {"sets":[{"chunks":[...]}, ...]}
+        const sets = manifest.sets || [{ chunks: manifest.chunks }];
+
+        // Check which sets we already have cached (by first chunk name as set ID)
+        const cachedSets = await dbGet(db, "meta", "cachedSets");
+        const cachedSetIds = new Set((cachedSets && cachedSets.value) || []);
+
+        // Figure out which sets need downloading
+        const setsToDownload = [];
+        for (let si = 0; si < sets.length; si++) {
+          const setId = sets[si].chunks[0].name;
+          if (!cachedSetIds.has(setId)) {
+            setsToDownload.push({ index: si, set: sets[si], id: setId });
+          }
+        }
+
+        if (setsToDownload.length === 0) {
+          // Everything cached — nothing to download
+          return;
+        }
+
+        // Calculate total download size
+        const grandTotal = setsToDownload.reduce(
+          (s, item) => s + item.set.chunks.reduce((s2, c) => s2 + c.size, 0),
+          0,
+        );
+
+        // First, verify password with the first set we're downloading
+        loadingStatus.textContent = "Downloading...";
+        let bytesDownloaded = 0;
+        let passwordVerified = false;
+        let allNewFiles = [];
+        let fileOffset = fileIndex.length;
+
+        // Show player screen early so files appear as they decrypt
+        showScreen(screenPlayer);
+
+        for (let di = 0; di < setsToDownload.length; di++) {
+          const { index: si, set, id: setId } = setsToDownload[di];
+
+          loadingStatus.textContent =
+            "Downloading set " +
+            (di + 1) +
+            " of " +
+            setsToDownload.length +
+            "...";
+
+          const result = await downloadSet(
+            set.chunks,
+            di,
+            setsToDownload.length,
+            bytesDownloaded,
+            grandTotal,
+          );
+          bytesDownloaded = result.bytesDownloaded;
+          const { meta, dataStart } = parseSetBlob(result.buffer);
+
+          // Verify password on first set
+          if (!passwordVerified) {
+            loadingStatus.textContent = "Verifying password...";
+            await new Promise((r) => setTimeout(r, 50));
+            try {
+              const v = meta.verify;
+              await decryptData(
+                password,
+                v.salt,
+                v.iv,
+                meta.iterations,
+                hexToBytes(v.data),
+              );
+            } catch {
+              throw new Error("Wrong password");
+            }
+            passwordVerified = true;
+          }
+
+          // Add file entries and render
+          fileIndex = fileIndex.concat(meta.files);
+          renderPlaylist();
+
+          // Count total files across all sets to download
+          const totalNewFiles = setsToDownload.reduce((s, item) => {
+            // We don't know file count until downloaded, estimate from already-parsed
+            return s;
+          }, 0);
+
+          // Decrypt this set
+          const newFiles = await decryptSet(
+            password,
+            result.buffer,
+            meta,
+            dataStart,
+            db,
+            fileOffset,
+            fileIndex.length,
+          );
+          fileOffset += newFiles.length;
+          allNewFiles = allNewFiles.concat(newFiles);
+
+          // Mark set as cached
+          cachedSetIds.add(setId);
+          await dbPut(db, "meta", {
+            key: "cachedSets",
+            value: [...cachedSetIds],
+          });
         }
 
         decryptStatus.classList.add("hidden");
@@ -680,7 +787,7 @@
           key: "passwordHash",
           value: await hashPassword(password),
         });
-        await dbPut(db, "meta", { key: "filesMeta", value: meta.files });
+        await dbPut(db, "meta", { key: "filesMeta", value: fileIndex });
       }
 
       // ============ UNLOCK ============
@@ -701,17 +808,26 @@
           if (cachedHash && cachedMeta) {
             const inputHash = await hashPassword(password);
             if (inputHash === cachedHash.value) {
+              fileIndex = cachedMeta.value;
               const cachedKeys = new Set(await dbGetAllKeys(db, "files"));
-              const allPresent = cachedMeta.value.every((f) =>
-                cachedKeys.has(f.name),
-              );
-              if (allPresent) {
-                fileIndex = cachedMeta.value;
-                readyFiles = cachedKeys;
-                showScreen(screenPlayer);
-                renderPlaylist();
-                return;
+              readyFiles = cachedKeys;
+              showScreen(screenPlayer);
+              renderPlaylist();
+
+              // Check for new sets to download
+              try {
+                await processBlob(password, db);
+              } catch (e) {
+                // Ignore — already showing player with cached files
+                if (e.message === "Wrong password") {
+                  // Password changed — clear cache and re-download
+                  await dbClear(db);
+                  fileIndex = [];
+                  readyFiles = new Set();
+                  await processBlob(password, db);
+                }
               }
+              return;
             }
           }
 
